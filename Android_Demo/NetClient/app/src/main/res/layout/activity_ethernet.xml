@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.support.constraint.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="com.example.root.netclient.EthernetCommActivity"
+    tools:layout_editor_absoluteY="73dp"
+    tools:layout_editor_absoluteX="0dp">
+
+    <Button
+        android:id="@+id/SendBtn"
+        android:layout_width="143dp"
+        android:layout_height="48dp"
+        android:text="SEND"
+        tools:layout_constraintBottom_creator="1"
+        app:layout_constraintBottom_toBottomOf="parent"
+        tools:layout_constraintLeft_creator="1"
+        android:layout_marginBottom="36dp"
+        app:layout_constraintLeft_toLeftOf="@+id/Content" />
+
+    <EditText
+        android:id="@+id/IP_EDIT"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ems="10"
+        android:inputType="textPersonName"
+        android:layout_marginStart="80dp"
+        tools:layout_constraintTop_creator="1"
+        android:layout_marginTop="16dp"
+        tools:layout_constraintLeft_creator="1"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <EditText
+        android:id="@+id/PortEdit"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ems="10"
+        android:inputType="numberSigned"
+        tools:layout_constraintTop_creator="1"
+        android:layout_marginStart="22dp"
+        android:layout_marginTop="16dp"
+        tools:layout_constraintLeft_creator="1"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintLeft_toRightOf="@+id/IP_Lable" />
+
+    <TextView
+        android:id="@+id/IP_Lable"
+        android:layout_width="28dp"
+        android:layout_height="0dp"
+        android:text="Port"
+        tools:layout_constraintTop_creator="1"
+        tools:layout_constraintBottom_creator="1"
+        android:layout_marginStart="69dp"
+        app:layout_constraintBottom_toBottomOf="@+id/PortEdit"
+        android:layout_marginTop="16dp"
+        tools:layout_constraintLeft_creator="1"
+        android:layout_marginBottom="25dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintLeft_toRightOf="@+id/IP_EDIT" />
+
+    <TextView
+        android:id="@+id/textView2"
+        android:layout_width="28dp"
+        android:layout_height="0dp"
+        android:text="IP"
+        android:layout_marginEnd="17dp"
+        android:layout_marginStart="35dp"
+        app:layout_constraintRight_toLeftOf="@+id/IP_EDIT"
+        tools:layout_constraintTop_creator="1"
+        tools:layout_constraintRight_creator="1"
+        tools:layout_constraintBottom_creator="1"
+        app:layout_constraintBottom_toBottomOf="@+id/IP_Lable"
+        tools:layout_constraintLeft_creator="1"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintTop_toTopOf="@+id/IP_EDIT" />
+
+    <Button
+        android:id="@+id/StopBtn"
+        android:layout_width="184dp"
+        android:layout_height="48dp"
+        android:text="Stop"
+        tools:layout_constraintTop_creator="1"
+        android:layout_marginTop="45dp"
+        app:layout_constraintTop_toBottomOf="@+id/PortEdit"
+        app:layout_constraintLeft_toLeftOf="@+id/PortEdit" />
+
+    <Button
+        android:id="@+id/ConnectBtn"
+        android:layout_width="168dp"
+        android:layout_height="48dp"
+        android:text="Connect"
+        tools:layout_constraintTop_creator="1"
+        tools:layout_constraintRight_creator="1"
+        android:layout_marginStart="62dp"
+        android:layout_marginEnd="68dp"
+        app:layout_constraintRight_toRightOf="@+id/IP_EDIT"
+        android:layout_marginTop="45dp"
+        app:layout_constraintTop_toBottomOf="@+id/IP_EDIT"
+        tools:layout_constraintLeft_creator="1"
+        app:layout_constraintLeft_toLeftOf="parent" />
+
+    <EditText
+        android:id="@+id/Content"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:ems="10"
+        android:inputType="textPersonName"
+        tools:layout_constraintTop_creator="1"
+        tools:layout_constraintRight_creator="1"
+        tools:layout_constraintBottom_creator="1"
+        app:layout_constraintBottom_toTopOf="@+id/SendBtn"
+        app:layout_constraintRight_toRightOf="@+id/NetStatus"
+        android:layout_marginTop="17dp"
+        app:layout_constraintTop_toBottomOf="@+id/NetStatus"
+        tools:layout_constraintLeft_creator="1"
+        android:layout_marginBottom="28dp"
+        app:layout_constraintLeft_toLeftOf="@+id/NetStatus" />
+
+    <android.support.constraint.Guideline
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/guideline"
+        app:layout_constraintGuide_begin="16dp"
+        android:orientation="horizontal"
+        tools:layout_editor_absoluteY="16dp"
+        tools:layout_editor_absoluteX="0dp" />
+
+    <TextView
+        android:id="@+id/NetStatus"
+        android:layout_width="583dp"
+        android:layout_height="38dp"
+        android:text="NetStatus"
+        tools:layout_constraintTop_creator="1"
+        tools:layout_constraintBottom_creator="1"
+        android:layout_marginStart="62dp"
+        app:layout_constraintBottom_toBottomOf="@+id/SendBtn"
+        android:layout_marginTop="197dp"
+        tools:layout_constraintLeft_creator="1"
+        android:layout_marginBottom="197dp"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+</android.support.constraint.ConstraintLayout>

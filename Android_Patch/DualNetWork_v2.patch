@@ -1,0 +1,239 @@
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/MobileSignalController.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/MobileSignalController.java
+index ad8e3bd..f657b53 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/MobileSignalController.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/MobileSignalController.java
+@@ -292,10 +292,12 @@ public class MobileSignalController extends SignalController<
+                     intent.getStringExtra(TelephonyIntents.EXTRA_DATA_SPN),
+                     intent.getBooleanExtra(TelephonyIntents.EXTRA_SHOW_PLMN, false),
+                     intent.getStringExtra(TelephonyIntents.EXTRA_PLMN));
+-            notifyListenersIfNecessary();
++			mNetworkController.FlushConnectivityforallnetwork(); // Add by Qing
++            //notifyListenersIfNecessary();
+         } else if (action.equals(TelephonyIntents.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED)) {
+             updateDataSim();
+-            notifyListenersIfNecessary();
++			mNetworkController.FlushConnectivityforallnetwork(); // Add by Qing
++            //notifyListenersIfNecessary();
+         }
+     }
+ 
+@@ -396,7 +398,15 @@ public class MobileSignalController extends SignalController<
+             mCurrentState.networkName = mServiceState.getOperatorAlphaShort();
+         }
+ 
+-        notifyListenersIfNecessary();
++		/*
++			Why we change notifyListenersIfNecessary() to FlushConnectivityforallnetwork()?
++			In reality, the FlushConnectivityforallnetwork() is the updateConnectivity()
++			in networkControllerimpl.  We use the function to update all features. but use
++			notifyListenersIfNecessary() just update a part features. Especially for the first
++			time startup.
++		*/
++       // notifyListenersIfNecessary();
++		mNetworkController.FlushConnectivityforallnetwork();  // Added by Qing
+     }
+ 
+     @VisibleForTesting
+@@ -405,7 +415,8 @@ public class MobileSignalController extends SignalController<
+                 || activity == TelephonyManager.DATA_ACTIVITY_IN;
+         mCurrentState.activityOut = activity == TelephonyManager.DATA_ACTIVITY_INOUT
+                 || activity == TelephonyManager.DATA_ACTIVITY_OUT;
+-        notifyListenersIfNecessary();
++		mNetworkController.FlushConnectivityforallnetwork(); // Add by Qing
++       // notifyListenersIfNecessary();
+     }
+ 
+     @Override
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/NetworkControllerImpl.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/NetworkControllerImpl.java
+index 2996808..08f002e 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/NetworkControllerImpl.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/NetworkControllerImpl.java
+@@ -562,6 +562,9 @@ public class NetworkControllerImpl extends BroadcastReceiver
+         mCallbackHandler.setNoSims(mHasNoSims);
+     }
+ 
++	public void FlushConnectivityforallnetwork(){
++		updateConnectivity();
++	}
+     /**
+      * Update the Inet conditions and what network we are connected to.
+      */
+diff --git a/frameworks/base/services/core/java/com/android/server/ConnectivityService.java b/frameworks/base/services/core/java/com/android/server/ConnectivityService.java
+index 75f5c15..62d51e8 100644
+--- a/frameworks/base/services/core/java/com/android/server/ConnectivityService.java
++++ b/frameworks/base/services/core/java/com/android/server/ConnectivityService.java
+@@ -793,13 +793,15 @@ public class ConnectivityService extends IConnectivityManager.Stub
+     }
+ 
+     private void handleMobileDataAlwaysOn() {
++		/*
+         final boolean enable = (Settings.Global.getInt(
+                 mContext.getContentResolver(), Settings.Global.MOBILE_DATA_ALWAYS_ON, 0) == 1);
+         final boolean isEnabled = (mNetworkRequests.get(mDefaultMobileDataRequest) != null);
+         if (enable == isEnabled) {
+             return;  // Nothing to do.
+-        }
++        }*/
+ 
++		final boolean enable = true;
+         if (enable) {
+             handleRegisterNetworkRequest(new NetworkRequestInfo(
+                     null, mDefaultMobileDataRequest, new Binder(), NetworkRequestInfo.REQUEST));
+@@ -1136,7 +1138,13 @@ public class ConnectivityService extends IConnectivityManager.Stub
+         if (nc != null) {
+             result.put(nai.network, nc);
+         }
+-
++		// Added for mobile network!
++		nai = getMobileNetwork();
++		nc = getNetworkCapabilitiesInternal(nai);
++        if (nc != null) {
++            result.put(nai.network, nc);
++        }
++	
+         if (!mLockdownEnabled) {
+             synchronized (mVpns) {
+                 Vpn vpn = mVpns.get(userId);
+@@ -2306,6 +2314,9 @@ public class ConnectivityService extends IConnectivityManager.Stub
+     // would it have a chance of satisfying any NetworkRequests.
+     private boolean unneeded(NetworkAgentInfo nai) {
+         if (!nai.created || nai.isVPN() || nai.lingering) return false;
++
++		if(nai.networkInfo.getType() == ConnectivityManager.TYPE_MOBILE) return false;
++
+         for (NetworkRequestInfo nri : mNetworkRequests.values()) {
+             // If this Network is already the highest scoring Network for a request, or if
+             // there is hope for it to become one if it validated, then it is needed.
+@@ -3910,6 +3921,11 @@ public class ConnectivityService extends IConnectivityManager.Stub
+         return mNetworkForRequestId.get(mDefaultRequest.requestId);
+     }
+ 
++	// Get the mobile Network information!  Added by Qing
++	private NetworkAgentInfo getMobileNetwork() {
++        return mNetworkForRequestId.get(mDefaultMobileDataRequest.requestId);
++    }
++
+     private boolean isDefaultNetwork(NetworkAgentInfo nai) {
+         return nai == getDefaultNetwork();
+     }
+@@ -3971,7 +3987,7 @@ public class ConnectivityService extends IConnectivityManager.Stub
+         //        NET_CAPABILITY_INTERNET);
+         final boolean useDefaultDns = false;
+         final boolean flushDns = updateRoutes(newLp, oldLp, netId);
+-        updateDnses(newLp, oldLp, netId, flushDns, useDefaultDns);
++        updateDnses(networkAgent, newLp, oldLp, netId, flushDns, useDefaultDns);
+ 
+         updateClat(newLp, oldLp, networkAgent);
+         if (isDefaultNetwork(networkAgent)) {
+@@ -4074,7 +4090,7 @@ public class ConnectivityService extends IConnectivityManager.Stub
+         return !routeDiff.added.isEmpty() || !routeDiff.removed.isEmpty();
+     }
+ 
+-    private void updateDnses(LinkProperties newLp, LinkProperties oldLp, int netId,
++    private void updateDnses(NetworkAgentInfo nai, LinkProperties newLp, LinkProperties oldLp, int netId,
+                              boolean flush, boolean useDefaultDns) {
+         if (oldLp == null || (newLp.isIdenticalDnses(oldLp) == false)) {
+             Collection<InetAddress> dnses = newLp.getDnsServers();
+@@ -4085,15 +4101,25 @@ public class ConnectivityService extends IConnectivityManager.Stub
+                     loge("no dns provided for netId " + netId + ", so using defaults");
+                 }
+             }
+-            if (DBG) log("Setting Dns servers for network " + netId + " to " + dnses);
++
++			/*
++			*  If the network is LAN, Then, there are no available DNS for this network. Once
++			* Setting a wrong DNS address, system will can't get the correct DNS address laterly.
++			* 																	--Qing 	
++			*/
+             try {
+-                mNetd.setDnsServersForNetwork(netId, NetworkUtils.makeStrings(dnses),
+-                    newLp.getDomains());
++				if(nai.networkInfo.getType() != ConnectivityManager.TYPE_ETHERNET || TextUtils.isEmpty(SystemProperties.get("net.ethislan")) ){
++					if (DBG) log("Setting Dns servers for network " + netId + " to " + dnses);
++					mNetd.setDefaultNetId(netId); // this is mainly for DNS search.
++	                mNetd.setDnsServersForNetwork(netId, NetworkUtils.makeStrings(dnses),
++    	                newLp.getDomains());
++				}
+             } catch (Exception e) {
+                 loge("Exception in setDnsServersForNetwork: " + e);
+             }
+-            final NetworkAgentInfo defaultNai = getDefaultNetwork();
+-            if (defaultNai != null && defaultNai.network.netId == netId) {
++            //final NetworkAgentInfo defaultNai = getDefaultNetwork();
++            //if (defaultNai != null && defaultNai.network.netId == netId) {
++			if(nai.networkInfo.getType() != ConnectivityManager.TYPE_ETHERNET || TextUtils.isEmpty(SystemProperties.get("net.ethislan")) ){
+                 setDefaultDnsSystemProperties(dnses);
+             }
+             flushVmDnsCache();
+@@ -4279,11 +4305,11 @@ public class ConnectivityService extends IConnectivityManager.Stub
+     private void makeDefault(NetworkAgentInfo newNetwork) {
+         if (DBG) log("Switching to new default network: " + newNetwork);
+         setupDataActivityTracking(newNetwork);
+-        try {
+-            mNetd.setDefaultNetId(newNetwork.network.netId);
+-        } catch (Exception e) {
+-            loge("Exception setting default network :" + e);
+-        }
++        //try {
++        //    mNetd.setDefaultNetId(newNetwork.network.netId);
++        //} catch (Exception e) {
++        //    loge("Exception setting default network :" + e);
++        //}
+         notifyLockdownVpn(newNetwork);
+         handleApplyDefaultProxy(newNetwork.linkProperties.getHttpProxy());
+         updateTcpBufferSizes(newNetwork);
+@@ -4332,6 +4358,7 @@ public class ConnectivityService extends IConnectivityManager.Stub
+         for (NetworkRequestInfo nri : mNetworkRequests.values()) {
+             final NetworkAgentInfo currentNetwork = mNetworkForRequestId.get(nri.request.requestId);
+             final boolean satisfies = newNetwork.satisfies(nri.request);
++
+             if (newNetwork == currentNetwork && satisfies) {
+                 if (VDBG) {
+                     log("Network " + newNetwork.name() + " was already satisfying" +
+diff --git a/frameworks/base/services/core/java/com/android/server/connectivity/NetworkMonitor.java b/frameworks/base/services/core/java/com/android/server/connectivity/NetworkMonitor.java
+index 5108564..9b6d279 100644
+--- a/frameworks/base/services/core/java/com/android/server/connectivity/NetworkMonitor.java
++++ b/frameworks/base/services/core/java/com/android/server/connectivity/NetworkMonitor.java
+@@ -272,7 +272,13 @@ public class NetworkMonitor extends StateMachine {
+ 
+         mIsCaptivePortalCheckEnabled = Settings.Global.getInt(mContext.getContentResolver(),
+                 Settings.Global.CAPTIVE_PORTAL_DETECTION_ENABLED, 1) == 1;
+-
++		
++		/* Ethernet will nerver need to check the DEFAULT_SERVER, since the Ethernet maybe
++		 * a local area network.     --Qing 
++		*/
++		if(mNetworkAgentInfo.networkInfo.getType() == ConnectivityManager.TYPE_ETHERNET) 
++			mIsCaptivePortalCheckEnabled = false;		
++	
+         start();
+     }
+ 
+@@ -636,7 +642,9 @@ public class NetworkMonitor extends StateMachine {
+     @VisibleForTesting
+     protected int isCaptivePortal() {
+         if (!mIsCaptivePortalCheckEnabled) return 204;
+-
++		if(mNetworkAgentInfo.networkInfo.getType() == ConnectivityManager.TYPE_ETHERNET) 
++			return 204;
++		
+         HttpURLConnection urlConnection = null;
+         int httpResponseCode = 599;
+         try {
+diff --git a/device/fsl/fsl_device/init.rc b/device/fsl/fsl_device/init.rc
+index 74a3e70..756a91d 100755
+--- a/device/fsl/fsl_device/init.rc
++++ b/device/fsl/fsl_device/init.rc
+@@ -104,7 +104,14 @@ on boot
+ 
+     # Set extsd access permission
+     setprop persist.sampling_profiler 1
++    
++    # Disable strictmode
++    setprop persist.sys.strictmode.disable 1
++    setprop persist.sys.strictmode.visual 0
+ 
++	## Current ethernet is a LAN
++	setprop net.ethislan yes
++	
+ # change for FSL specific service
