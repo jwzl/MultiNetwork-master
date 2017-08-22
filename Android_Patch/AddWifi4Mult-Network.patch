@@ -1,0 +1,56 @@
+diff --git a/frameworks/base/services/core/java/com/android/server/ConnectivityService.java b/frameworks/base/services/core/java/com/android/server/ConnectivityService.java
+index 62d51e8..c6e558f 100644
+--- a/frameworks/base/services/core/java/com/android/server/ConnectivityService.java
++++ b/frameworks/base/services/core/java/com/android/server/ConnectivityService.java
+@@ -633,6 +633,15 @@ public class ConnectivityService extends IConnectivityManager.Stub
+         mNetworkRequests.put(mDefaultRequest, defaultNRI);
+         mNetworkRequestInfoLogs.log("REGISTER " + defaultNRI);
+ 
++		// Dedicated to the wlan network.   --Qing
++		mDefaultWifiRequest = createInternetRequestForTransport(
++                NetworkCapabilities.TRANSPORT_WIFI);
++		defaultNRI = new NetworkRequestInfo(null, mDefaultWifiRequest,
++                new Binder(), NetworkRequestInfo.REQUEST);
++        mNetworkRequests.put(mDefaultWifiRequest, defaultNRI);
++        mNetworkRequestInfoLogs.log("REGISTER " + defaultNRI);
++
++		// Dedicated to the mobile data network.  --Qing
+         mDefaultMobileDataRequest = createInternetRequestForTransport(
+                 NetworkCapabilities.TRANSPORT_CELLULAR);
+ 
+@@ -1144,7 +1153,14 @@ public class ConnectivityService extends IConnectivityManager.Stub
+         if (nc != null) {
+             result.put(nai.network, nc);
+         }
+-	
++		// Added for Multiple network，Wifi ! 
++		// This is mainly for signal status bar's  updating.	
++		nai = getWifiNetwork();
++		nc = getNetworkCapabilitiesInternal(nai);
++        if (nc != null) {
++            result.put(nai.network, nc);
++        }
++		
+         if (!mLockdownEnabled) {
+             synchronized (mVpns) {
+                 Vpn vpn = mVpns.get(userId);
+@@ -3913,6 +3929,8 @@ public class ConnectivityService extends IConnectivityManager.Stub
+     // Note: if mDefaultRequest is changed, NetworkMonitor needs to be updated.
+     private final NetworkRequest mDefaultRequest;
+ 
++	// The Request for Wlan network.
++	private final NetworkRequest mDefaultWifiRequest;
+     // Request used to optionally keep mobile data active even when higher
+     // priority networks like Wi-Fi are active.
+     private final NetworkRequest mDefaultMobileDataRequest;
+@@ -3925,6 +3943,10 @@ public class ConnectivityService extends IConnectivityManager.Stub
+ 	private NetworkAgentInfo getMobileNetwork() {
+         return mNetworkForRequestId.get(mDefaultMobileDataRequest.requestId);
+     }
++	// Get the wifi Network information!  Added by Qing
++	private NetworkAgentInfo getWifiNetwork() {
++        return mNetworkForRequestId.get(mDefaultWifiRequest.requestId);
++    }
+ 
+     private boolean isDefaultNetwork(NetworkAgentInfo nai) {
+         return nai == getDefaultNetwork();
