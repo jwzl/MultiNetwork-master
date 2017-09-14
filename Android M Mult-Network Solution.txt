@@ -1,0 +1,1153 @@
+========================
+1. Android Networking ||
+========================
+
+								Android network API
+			---	Control/Monitor	API ---		|	 		--- Data communication API ---
+		ConnectivityManager					|
+		ConnectivityService					|	  	Java Socket / Android Jni socket/ packaged API based on socket(
+		NetworkFactory						|      	such as http/ssl and so on.)
+		Netd								|     	Linux Socket
+		Linux Network API					|
+											|
+
+Control/Monitor	API: like the control bus of a device. The primary responsibilities of these API:
+	1) Monitor network connections (Wi-Fi, mobile, Ethernet etc.)
+	2) Send broadcast intents when network connectivity changes
+	3) Attempt to "fail over" to another network when connectivity to a network is lost
+	4) Provide an API that allows applications to query the coarse-grained or fine-grained state of the available networks
+	5) Provide an API that allows applications to request and select networks for their data traffic
+	6) start/stop the assigned network, etc.
+
+Data communication API: like the data bus of a device. The primary responsibilities of these API:
+	
+	1) Provide some API for an application to communicate with other peer in this network. 
+
+
+
+==================================
+2. Android Multi-networking App.||
+==================================
+	Before show the APP, we introduce some Multi-networking API for you.	
+	1) Binds the current process to network:
+		boolean bindProcessToNetwork (Network network)
+		Detailed description please refer to:  https://developer.android.com/reference/android/net/ConnectivityManager.html#bindProcessToNetwork(android.net.Network)
+		To assign a network interface by force, you should use this api.
+
+	2) Build network request:
+		void registerNetworkCallback (NetworkRequest request,
+                ConnectivityManager.NetworkCallback networkCallback)
+
+		Detailed description please refer to: https://developer.android.com/reference/android/net/ConnectivityManager.html#registerNetworkCallback(android.net.NetworkRequest,%20android.net.ConnectivityManager.NetworkCallback)
+		And a demo for this api's application:
+		NetworkRequest.Builder builder;
+        builder = new  NetworkRequest.Builder();
+        // Clear all capability.
+        builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
+        builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
+        builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_TRUSTED);
+        
+        builder.addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
+
+        CMgr.registerNetworkCallback(builder.build(), new ConnectivityManager.NetworkCallback(){
+            @Override
+            public void onAvailable(Network network) {
+				// When this network is on available
+				...........
+            }
+            @Override
+            public void  onLost(Network network) {
+				// When this network is on lost
+                ......
+            }
+        });
+
+	These two API are the key point to finished Android M Multi-networking App.						
+	About the android Multi-networking App demo, please refer to https://github.com/jwzl/MultiNetwork-master/tree/master/Android_Demo/NetClient.
+	In theory, since android M support Multi-networking, this should be all steps for Multi-networking.
+	But in reality, there are stil some bug to be fixed by modifying the source code of framework. 
+
+
+==============================================================
+3. Android M network's mechanism of connectivity & mangement||
+==============================================================
+To study the Android Multi-networking's mechanism of connectivity & mangement, there are
+two important Objects to be clear: Networkrequest and NetworkAgent.
+
+==================
+3.1 Networkrequest
+As the name described, it's a request for one or more network type. For example, you need 
+a network of ethernet type, you should build a networkrequest for ethernet. And if you need
+a network of all type (ethernet, wifi, mobile), you should build a networkrequest for all network
+type.	
+
+================
+3.2 NetworkAgent
+As the name described, it's a agent of a network. This network is controled or monitored by
+this networkAgent, that is ,  the networkAgent is stand for the network in a sense.  The NetworkAgent
+is created by Networkfactory. For a network type, it just has only one networkfactroy, and for a networkfactory,
+it can have many networkAgent. The networkAgent is just only for one networktype. 
+For example, the networkfactory is like a water Supplement factory, and the networkAgent is like a water tap in your
+house. Once you need the water, you just open the water tap to get water instead of going to the water Supplement factory.
+
+Network interface is started/stopped indirectly by the NetworkAgent (directly by NetworkFactory).   
+
+=============================================
+3.3 The core logic of the network's mechanism	
+	Once you know the two objects above, it's easy to read this code segment. it's the core 
+	logic of the network's mechanism. The function named rematchNetworkAndRequests(), and it's
+	called when Networkrequest/NetworkAgent is registered, or this network state is changed. 	
+	The responsibility of rematchNetworkAndRequests() is mach/rematch the networkAgentInfo and networkrequest.
+	NetworkAgentInfo is the information of the networkAgent. 
+
+	private void rematchNetworkAndRequests(NetworkAgentInfo newNetwork,
+            ReapUnvalidatedNetworks reapUnvalidatedNetworks) {
+        if (!newNetwork.created) return;  /* If no created, then return */
+        boolean keep = newNetwork.isVPN();  /* is VPN ?*/
+        boolean isNewDefault = false;   
+        NetworkAgentInfo oldDefaultNetwork = null;
+
+        if (VDBG) log("rematching " + newNetwork.name());
+        // Find and migrate to this Network any NetworkRequests for
+        // which this network is now the best.
+        ArrayList<NetworkAgentInfo> affectedNetworks = new ArrayList<NetworkAgentInfo>();
+        ArrayList<NetworkRequestInfo> addedRequests = new ArrayList<NetworkRequestInfo>();
+
+        if (VDBG) log(" network has: " + newNetwork.networkCapabilities);
+
+        for (NetworkRequestInfo nri : mNetworkRequests.values()) {   
+			//Qing: mNetworkRequests is all current network request info's lists.
+			// Qing: According to the networkreuest  to get the corresponding network agent; if the network agent
+			// is not added(haven't been enabled), then , return null,  and it means that this is a new networrk 
+			//	Otherwise, it will retrun the current available
+			// network.       
+      
+			final NetworkAgentInfo currentNetwork = mNetworkForRequestId.get(nri.request.requestId);
+
+			/* Qing: this request wether satisfies this new network ? <=> is the request  for this network ? */
+			// that is , if the networkreuqest is for Ethernet, but the new network is wifi, then
+			// the "satisfies = false", If the networkreuqest is for Ethernet, and the new newtwork
+			// is the Ethernet, then "satisfies = true". If the networkreuqest is for general, new network
+			// can satisfies, that is "satisfies = true"
+
+            final boolean satisfies = newNetwork.satisfies(nri.request);
+
+			/* Qing:
+				If the requested network has existed, and the request is matched the new network! then
+				do nothing and countinue the next request! 
+				the new nettwork need find new network reuest to  match!
+			*/
+
+            if (newNetwork == currentNetwork && satisfies) {
+                if (VDBG) {
+                    log("Network " + newNetwork.name() + " was already satisfying" +
+                            " request " + nri.request.requestId + ". No change.");
+                }
+                keep = true;
+                continue;
+            }
+
+            // check if it satisfies the NetworkCapabilities
+
+            if (VDBG) log("  checking if request is satisfied: " + nri.request);
+
+			// Qing: If the network reuuest is for the new network ?
+
+            if (satisfies) {
+				//Qing: the networkrequest is not a network request , then , continuous find
+				// the next network request! this is  a callback listener.
+
+                if (!nri.isRequest) {
+                    // This is not a request, it's a callback listener.
+                    // Add it to newNetwork regardless of score.
+                    if (newNetwork.addRequest(nri.request)) addedRequests.add(nri);
+                    continue;
+                }
+
+                // next check if it's better than any current network we're using for
+                // this request
+
+                if (VDBG) {
+                    log("currentScore = " +
+                            (currentNetwork != null ? currentNetwork.getCurrentScore() : 0) +
+                            ", newScore = " + newNetwork.getCurrentScore());
+                }
+
+				//Qing:
+				// currentNetwork == null is means that the network request is the new request and 
+				// not matched. the new network will match the networkrequest. 
+				//Qing:
+				// currentNetwork.getCurrentScore() < newNetwork.getCurrentScore() is means that
+				// the network request has matched a networkagent different from the new netwwork.( since it
+				// has > 1 kinds network Compatibility， such as which compitable with Ethernet and mobile )
+				// but the new network's score is more than the current network. then the new network
+				// will replace the current network.
+				// In general, the default network has multiple network compatibility. Others just has one kinds
+				// network compatibility. 
+				//QIng:
+				//All in speaking, this is match the networkAgent & Networkrequest.
+
+                if (currentNetwork == null ||
+                        currentNetwork.getCurrentScore() < newNetwork.getCurrentScore()) {
+                    if (DBG) log("rematch for " + newNetwork.name());
+                    if (currentNetwork != null) {
+                        if (DBG) log("   accepting network in place of " + currentNetwork.name());
+						//Qing : the network request will be removed from this network data structure. 
+                        currentNetwork.networkRequests.remove(nri.request.requestId);
+                        currentNetwork.networkLingered.add(nri.request);
+						// Qing: the current network will be affected. maybe the current network
+						// will be down!
+                        affectedNetworks.add(currentNetwork);
+                    } else {
+                        if (DBG) log("   accepting network in place of null");
+                    }
+                    unlinger(newNetwork);
+
+					//Qing: Add the matched pairs to map of [networkrequestid, networkagent ]
+					// also maybe : replace the current network by the new network in the hash table;
+                    mNetworkForRequestId.put(nri.request.requestId, newNetwork);
+
+					//Qing: add this request into the [networkRequests] member of NetworkAngentinfo
+                    if (!newNetwork.addRequest(nri.request)) { 
+                        Slog.wtf(TAG, "BUG: " + newNetwork.name() + " already has " + nri.request);
+                    }
+					//Qing: the new  network will  match all matched network request. So, it need a 
+					// lists to store , we named it as "addedRequests"
+                    addedRequests.add(nri);
+                    keep = true;
+                    // Tell NetworkFactories about the new score, so they can stop
+                    // trying to connect if they know they cannot match it.
+                    // TODO - this could get expensive if we have alot of requests for this
+                    // network.  Think about if there is a way to reduce this.  Push
+                    // netid->request mapping to each factory?
+					// Qing: Send current score to all network factories. every network factory
+					// will according to  the score to process their own netwok.
+					// Qing:
+					// As default, every one network factory will compare the score with it's
+					// own score & network Capabilities. If the score < network factory's score,
+					// then, network factory will try to start own network.
+					// If the score > network factory's score, then, network factory will try to shut down own network.
+ 	 
+                    sendUpdatedScoreToFactories(nri.request, newNetwork.getCurrentScore());
+
+					//Qing: If the network request is system default network request, system
+					// will close the old network.  Because the default network request is compatible
+					// any network, so, any a new network will try to match the default network request.
+					// If it is the first network, the default network request will match this network.
+					// and the first network will become the system default network.
+					// The following logical will close the previous the default netwwork.
+                    if (mDefaultRequest.requestId == nri.request.requestId) {
+                        isNewDefault = true;
+                        oldDefaultNetwork = currentNetwork;
+                    }
+                }
+		 //Qing:
+		 // it should be teardown! 
+         } else if (newNetwork.networkRequests.get(nri.request.requestId) != null) {// Qing: Not satisfies
+                // If "newNetwork" is listed as satisfying "nri" but no longer satisfies "nri",
+                // mark it as no longer satisfying "nri".  Because networks are processed by
+                // rematchAllNetworkAndRequests() in descending score order, "currentNetwork" will
+                // match "newNetwork" before this loop will encounter a "currentNetwork" with higher
+                // score than "newNetwork" and where "currentNetwork" no longer satisfies "nri".
+                // This means this code doesn't have to handle the case where "currentNetwork" no
+                // longer satisfies "nri" when "currentNetwork" does not equal "newNetwork".
+
+				//Qing: Current network request is not matched for the new network, but the newwork's
+				// network request lsits contain this request. then system will remove the request from
+				// the new work request lists.  this logcal can be hard to reach. 
+                if (DBG) {
+                    log("Network " + newNetwork.name() + " stopped satisfying" +
+                            " request " + nri.request.requestId);
+                }
+                newNetwork.networkRequests.remove(nri.request.requestId);
+                if (currentNetwork == newNetwork) {
+                    mNetworkForRequestId.remove(nri.request.requestId);
+                    sendUpdatedScoreToFactories(nri.request, 0);
+                } else {
+                    if (nri.isRequest == true) {
+                        Slog.wtf(TAG, "BUG: Removing request " + nri.request.requestId + " from " +
+                                newNetwork.name() +
+                                " without updating mNetworkForRequestId or factories!");
+                    }
+                }
+                // TODO: technically, sending CALLBACK_LOST here is
+                // incorrect if nri is a request (not a listen) and there
+                // is a replacement network currently connected that can
+                // satisfy it. However, the only capability that can both
+                // a) be requested and b) change is NET_CAPABILITY_TRUSTED,
+                // so this code is only incorrect for a network that loses
+                // the TRUSTED capability, which is a rare case.
+                callCallbackForRequest(nri, newNetwork, ConnectivityManager.CALLBACK_LOST);
+            }
+        }
+        // Linger any networks that are no longer needed.
+		// Qing: If these replaced networks is not needed, then system will linger (closed ) the network!	
+        for (NetworkAgentInfo nai : affectedNetworks) {
+            if (nai.lingering) {
+                // Already lingered.  Nothing to do.  This can only happen if "nai" is in
+                // "affectedNetworks" twice.  The reasoning being that to get added to
+                // "affectedNetworks", "nai" must have been satisfying a NetworkRequest
+                // (i.e. not lingered) so it could have only been lingered by this loop.
+                // unneeded(nai) will be false and we'll call unlinger() below which would
+                // be bad, so handle it here.
+            } else if (unneeded(nai)) {
+				//Qing: If the network still has matched network request, then the network
+               //is still needed! 
+                linger(nai);
+            } else {
+                // Clear nai.networkLingered we might have added above.
+                unlinger(nai);
+            }
+        }
+
+		//Qing: If the newwork is default network, then switch to the new network! 	
+        if (isNewDefault) {
+            // Notify system services that this network is up.
+            makeDefault(newNetwork);
+            synchronized (ConnectivityService.this) {
+                // have a new default network, release the transition wakelock in
+                // a second if it's held.  The second pause is to allow apps
+                // to reconnect over the new network
+                if (mNetTransitionWakeLock.isHeld()) {
+                    mHandler.sendMessageDelayed(mHandler.obtainMessage(
+                            EVENT_CLEAR_NET_TRANSITION_WAKELOCK,
+                            mNetTransitionWakeLockSerialNumber, 0),
+                            1000);
+                }
+            }
+        }
+
+        // do this after the default net is switched, but
+        // before LegacyTypeTracker sends legacy broadcasts
+        for (NetworkRequestInfo nri : addedRequests) notifyNetworkCallback(newNetwork, nri);
+
+        if (isNewDefault) {
+            // Maintain the illusion: since the legacy API only
+            // understands one network at a time, we must pretend
+            // that the current default network disconnected before
+            // the new one connected.
+			//Qing: the will maybe close old default network
+            if (oldDefaultNetwork != null) {
+                mLegacyTypeTracker.remove(oldDefaultNetwork.networkInfo.getType(),
+                                          oldDefaultNetwork, true);
+            }
+            mDefaultInetConditionPublished = newNetwork.lastValidated ? 100 : 0;
+            mLegacyTypeTracker.add(newNetwork.networkInfo.getType(), newNetwork);
+            notifyLockdownVpn(newNetwork);
+        }
+
+		// Qing: is for vpn	
+        if (keep) {
+            // Notify battery stats service about this network, both the normal
+            // interface and any stacked links.
+            // TODO: Avoid redoing this; this must only be done once when a network comes online.
+            try {
+                final IBatteryStats bs = BatteryStatsService.getService();
+                final int type = newNetwork.networkInfo.getType();
+
+                final String baseIface = newNetwork.linkProperties.getInterfaceName();
+                bs.noteNetworkInterfaceType(baseIface, type);
+                for (LinkProperties stacked : newNetwork.linkProperties.getStackedLinks()) {
+                    final String stackedIface = stacked.getInterfaceName();
+                    bs.noteNetworkInterfaceType(stackedIface, type);
+                    NetworkStatsFactory.noteStackedIface(stackedIface, baseIface);
+                }
+            } catch (RemoteException ignored) {
+            }
+
+            // This has to happen after the notifyNetworkCallbacks as that tickles each
+            // ConnectivityManager instance so that legacy requests correctly bind dns
+            // requests to this network.  The legacy users are listening for this bcast
+            // and will generally do a dns request so they can ensureRouteToHost and if
+            // they do that before the callbacks happen they'll use the default network.
+            //
+            // TODO: Is there still a race here? We send the broadcast
+            // after sending the callback, but if the app can receive the
+            // broadcast before the callback, it might still break.
+            //
+            // This *does* introduce a race where if the user uses the new api
+            // (notification callbacks) and then uses the old api (getNetworkInfo(type))
+            // they may get old info.  Reverse this after the old startUsing api is removed.
+            // This is on top of the multiple intent sequencing referenced in the todo above.
+            for (int i = 0; i < newNetwork.networkRequests.size(); i++) {
+                NetworkRequest nr = newNetwork.networkRequests.valueAt(i);
+                if (nr.legacyType != TYPE_NONE && isRequest(nr)) {
+                    // legacy type tracker filters out repeat adds
+                    mLegacyTypeTracker.add(nr.legacyType, newNetwork);
+                }
+            }
+
+            // A VPN generally won't get added to the legacy tracker in the "for (nri)" loop above,
+            // because usually there are no NetworkRequests it satisfies (e.g., mDefaultRequest
+            // wants the NOT_VPN capability, so it will never be satisfied by a VPN). So, add the
+            // newNetwork to the tracker explicitly (it's a no-op if it has already been added).
+            if (newNetwork.isVPN()) {
+                mLegacyTypeTracker.add(TYPE_VPN, newNetwork);
+            }
+        }
+		//Qing: teardown all unneeded network!
+        if (reapUnvalidatedNetworks == ReapUnvalidatedNetworks.REAP) {
+            for (NetworkAgentInfo nai : mNetworkAgentInfos.values()) {
+                if (unneeded(nai)) {
+                    if (DBG) log("Reaping " + nai.name());
+                    teardownUnneededNetwork(nai);
+                }
+            }
+        }
+    }
+
+
+	private void evalRequest(NetworkRequestInfo n) {
+        if (VDBG) log("evalRequest");
+
+		//Qing: 
+		// If the this network(factory)'s score is more than other network, then, 
+		// System will start this network.	
+        if (n.requested == false && n.score < mScore &&
+                n.request.networkCapabilities.satisfiedByNetworkCapabilities(
+                mCapabilityFilter) && acceptRequest(n.request, n.score)) {
+            if (VDBG) log("  needNetworkFor");
+            needNetworkFor(n.request, n.score);
+            n.requested = true;
+		
+		//Qing:
+		//If this network(factory)'s score is less than other network, then, System will 
+		//Shutdown this network.
+		// In reality, Ethernet & wifi not stop this network. just mobile try to shutdown
+		// this network. 	 
+        } else if (n.requested == true &&
+                (n.score > mScore || n.request.networkCapabilities.satisfiedByNetworkCapabilities(
+                mCapabilityFilter) == false || acceptRequest(n.request, n.score) == false)) {
+            if (VDBG) log("  releaseNetworkFor");
+			// We must support the mult-network
+            releaseNetworkFor(n.request);
+            n.requested = false;
+        } else {
+            if (VDBG) log("  done");
+        }
+    }
+	### As a conclusion：
+	For the one networkrequest
+		===========================	
+		|                         |
+		|   One Networkrequest    |   Ethernet(150) > Wifi(60) > mobile(50)   
+		|   (defaultrequest)      | 
+		===========================
+		
+	The network who has highest score, will work and others will be shut down!
+
+	For the mult-networkrequest:	
+	    ===========================	    ===========================	           ===========================
+		|                         |     |                         |            |                         |
+		|   One Networkrequest    |     | Networkrequest 2        |            |  Networkrequest 2       |
+		|    (defaultrequest)     |     | (Dedicated to Wifi)     |            |  (Dedicated to Mobile)  |
+		===========================     ===========================            ===========================
+  
+    For the mult-network, every networkrequest is same as the "One Networkrequest" when matching. we should
+	modify the framework to finish it. 
+	
+
+
+3.4 The process for starting Ethernet
+Start/stop the ethernet only with the networkrequest.   
+
+a) start/stop the Ethernet by networkrequest
+->  [EthernetService.java]: onBootPhase()
+	finaly, this will call start() in [EthernetNetworkFactory.java]。
+	
+-> [EthernetNetworkFactory.java]:start()
+	finaly, this will call register().
+
+->	[ConnectivityService.java]: registerNetworkFactory():
+	this function will call EVENT_REGISTER_NETWORK_FACTORY， and finally call handleRegisterNetworkFactory();
+
+->  [ConnectivityService.java]: handleRegisterNetworkFactory()
+	this function will call nfi.asyncChannel.connect（）and send CMD_CHANNEL_HALF_CONNECTED message. and the message is recieved by
+	handleAsyncChannelHalfConnect().
+
+->   [ConnectivityService.java]: class NetworkStateTrackerHandler 中的handleMessage（）
+	case AsyncChannel.CMD_CHANNEL_HALF_CONNECTED: {
+    	handleAsyncChannelHalfConnect(msg);
+        break;
+    }
+
+->  [ConnectivityService.java]: handleAsyncChannelHalfConnect()
+
+	 private void handleAsyncChannelHalfConnect(Message msg) {
+        
+        if (mNetworkFactoryInfos.containsKey(msg.replyTo)) {
+            if (msg.arg1 == AsyncChannel.STATUS_SUCCESSFUL) {
+                ..............
+                for (NetworkRequestInfo nri : mNetworkRequests.values()) {
+                    if (nri.isRequest == false) continue;
+                    NetworkAgentInfo nai = mNetworkForRequestId.get(nri.request.requestId);
+                    ac.sendMessage(android.net.NetworkFactory.CMD_REQUEST_NETWORK,
+                            (nai != null ? nai.getCurrentScore() : 0), 0, nri.request);
+           ..............................
+	}
+	
+	This function will send [CMD_REQUEST_NETWORK] to all factories, and the [CMD_REQUEST_NETWORK] is
+	processed by handleAddRequest(). Which is same as the sendUpdatedScoreToFactories().
+
+-> [ NetworkFactory.java]: handleAddRequest()
+
+	protected void handleAddRequest(NetworkRequest request, int score) {
+        ...........
+        evalRequest(n);
+    }
+
+-> [ NetworkFactory.java]: evalRequest()
+
+ private void evalRequest(NetworkRequestInfo n) {
+      .....................
+		// Then the n.score =0, since ethernet has no ip.
+        if (n.requested == false && n.score < mScore &&
+                n.request.networkCapabilities.satisfiedByNetworkCapabilities(
+                mCapabilityFilter) && acceptRequest(n.request, n.score)) {
+           
+            needNetworkFor(n.request, n.score);
+            n.requested = true;
+        } else if (n.requested == true &&
+                (n.score > mScore || n.request.networkCapabilities.satisfiedByNetworkCapabilities(
+                mCapabilityFilter) == false || acceptRequest(n.request, n.score) == false)) {
+			// We must support the mult-network
+            //releaseNetworkFor(n.request);
+            //n.requested = false;
+        } else {
+            if (VDBG) log("  done");
+        }
+ }
+
+-> [ NetworkFactory.java]: needNetworkFor();
+	
+ protected void needNetworkFor(NetworkRequest networkRequest, int score) {
+        if (++mRefCount == 1) startNetwork();
+    }
+
+-> [EthernetNetworkFactory.java]: startNetwork()
+	protected void startNetwork() {
+            onRequestNetwork();
+    }
+
+-> [EthernetNetworkFactory.java]:  onRequestNetwork()
+
+	 public void onRequestNetwork() {
+        ...............
+        Thread dhcpThread = new Thread(new Runnable() {
+            public void run() {
+               
+                   .......................
+                    
+					// Run DHCP to get ip address	
+                    DhcpResults dhcpResults = new DhcpResults();
+                    .........................
+
+                synchronized(EthernetNetworkFactory.this) {
+                    ....................
+
+                    // Create our NetworkAgent.
+                    mNetworkAgent = new NetworkAgent(mFactory.getLooper(), mContext,
+                            NETWORK_TYPE, mNetworkInfo, mNetworkCapabilities, mLinkProperties,
+                            NETWORK_SCORE) {
+                        ........................
+                    };
+                }
+            }
+        });
+        dhcpThread.start();
+    }
+
+-> [NetworkAgent.java]: registerNetworkAgent(): 
+
+-> [ConnectivityService.java]: handleRegisterNetworkAgent() :
+-> [ConnectivityService.java]: updateNetworkInfo():
+   When finished the updateNetworkInfo(), the Ethernet will work. And everything about
+   Ethernet is Okay.		
+
+
+b) Ethernet update status
+-> [NetlinkHandler.cpp]:onEvent:
+	Netd will monitor the Ethernet's state, and will send some event to android network 
+	framework. such as NetlinkEvent::Action::kRemove，NetlinkEvent::Action::kLinkUp.
+	When send the NetlinkEvent::Action::kLinkUp/kLinkDown event,  system will finally call updateInterfaceState().
+
+-> [EthernetNetworkFactory.java]: updateInterfaceState():
+	This will call mFactory.setScoreFilter() to send  CMD_SET_SCORE messagee, and finally call handleSetScore（）
+	to set this network's score.
+
+-> [NetworkFactory.java]: handleSetScore():
+   This will set this network's score and re-evaluate this network.
+	
+
+3.5 The process for starting Mobile 
+
+a) On/Off the mobile by the user interface:
+<- [DcTrackerBase.java]: onSetUserDataEnabled(boolean enabled)
+	onSetUserDataEnabled(boolean enabled){
+		if (enabled) {
+           onTrySetupData(Phone.REASON_DATA_ENABLED);
+        } else {
+           onCleanUpAllConnections(Phone.REASON_DATA_SPECIFIC_DISABLED);
+        }	
+	}
+
+   If disabled,onCleanUpAllConnections() will call tearDown() to shutdown the mobile 
+   network.
+
+<-【DcTracker.java】:onTrySetupData()
+	onTrySetupData() -> TrySetupData() -> setupData(); 
+	setupData()-> bringUp().
+
+->  [DcAsyncChannel.java] bringUp():
+	There are two functions: bringUp（） and  tearDown（） in DcAsyncChannel.java, bringUp（） is for starting the mobile network，
+	and tearDown（） is for shutting down the mobile network. 
+	bringUp() will send EVENT_CONNECT event to ActivatingState；
+
+->  [DataConnection.java]: onConnect()
+	1) . This will send EVENT_SETUP_DATA_CONNECTION_DONE event to DcActivatingState.  
+	2) When finished, this will call mPhone.mCi.setupDataCall() to start mobile network(such as starting pppd)
+		[RIL.java]: setupDataCall() -> .... -> pppd_start(). When start the pppd, Ip will be getted.
+
+->  [DataConnection.java]: DcActivatingState : processMessage（）
+
+	case EVENT_SETUP_DATA_CONNECTION_DONE:
+		...............
+	switch (result) {
+     	case SUCCESS:
+            // All is well
+        	mDcFailCause = DcFailCause.NONE;
+            transitionTo(mActiveState);
+            break;
+	}
+
+-> [DataConnection.java]: class DcActiveState: enter():
+
+  private class DcActiveState extends State {
+        @Override public void enter() {
+          ..............................
+
+            if (createNetworkAgent) {
+                mNetworkAgent = new DcNetworkAgent(getHandler().getLooper(), mPhone.getContext(),
+                        "DcNetworkAgent", mNetworkInfo, makeNetworkCapabilities(), mLinkProperties,
+                        50, misc);
+            }
+        }
+
+->[DataConnection.java]: private class DcNetworkAgent extends NetworkAgent{}:
+  When new the father class(NetworkAgent),  registerNetworkAgent() will be called .
+
+-> [NetworkAgent.java]: registerNetworkAgent(): 
+
+-> [ConnectivityService.java]: handleRegisterNetworkAgent() :
+-> [ConnectivityService.java]: updateNetworkInfo():
+   When finished the updateNetworkInfo(), mobile networkAgent will match with
+   the mobile networkrequest. And the mobile will work. 	
+
+b) ON/OFF the mobile by networkrequest:
+When the rematchNetworkAndRequests() is called or sendUpdatedScoreToFactories() is called,
+this will maybe ON/OFF the mobile network.
+Since the rematchNetworkAndRequests() will call sendUpdatedScoreToFactories(), let's start
+from sendUpdatedScoreToFactories().
+
+-> [ConnectivityService.java]: sendUpdatedScoreToFactories()
+	 
+	private void sendUpdatedScoreToFactories(NetworkRequest networkRequest, int score) {
+        .......
+        for (NetworkFactoryInfo nfi : mNetworkFactoryInfos.values()) {
+            nfi.asyncChannel.sendMessage(android.net.NetworkFactory.CMD_REQUEST_NETWORK, score, 0,
+                    networkRequest);
+        }
+    }
+	This function will send CMD_REQUEST_NETWORK message to all networkfactories.
+
+-> [ NetworkFactory.java]: handleAddRequest()
+
+	About this detailed call relationship，please refer to the Ethernet's part.  
+
+-> [ NetworkFactory.java]: evalRequest()
+
+-> [ NetworkFactory.java]: needNetworkFor();
+	DctController.java Overwrite this needNetworkFor().
+
+-> [DctController.java]: needNetworkFor()
+	 protected void needNetworkFor(NetworkRequest networkRequest, int score) {
+            ....................
+            DcTrackerBase dcTracker =((PhoneBase)mPhone).mDcTracker;
+            String apn = apnForNetworkRequest(networkRequest);
+            if (dcTracker.isApnSupported(apn)) {
+                requestNetwork(networkRequest, dcTracker.getApnPriority(apn), l);
+            } 
+			......
+     }
+	
+-> [DctController.java]: requestNetwork()
+	requestNetwork()->processRequests()->onProcessRequest();
+
+-> [DctController.java]: onProcessRequest()
+
+	private void onProcessRequest() {
+        .......................
+
+        // if we have no active phones or the active phone is the desired, make requests
+        if (activePhoneId == INVALID_PHONE_INDEX || activePhoneId == requestedPhoneId) {
+            Iterator<Integer> iterator = mRequestInfos.keySet().iterator();
+            while (iterator.hasNext()) {
+                RequestInfo requestInfo = mRequestInfos.get(iterator.next());
+                if (requestInfo.executedPhoneId != INVALID_PHONE_INDEX) continue;
+                if (getRequestPhoneId(requestInfo.request) == requestedPhoneId) {
+                    mDcSwitchAsyncChannel[requestedPhoneId].connect(requestInfo);
+                }
+            }
+        } else {
+            // otherwise detatch so we can try connecting to the high-priority phone
+            mDcSwitchAsyncChannel[activePhoneId].disconnectAll();
+        }
+    }
+
+-> [DcSwitchAsyncChannel.java]: connect()
+	This function will send  REQ_CONNECT message to class AttachingState in the DcSwitchStateMachine.java.
+	And the message is processed by processMessage().
+
+-> [DcSwitchStateMachine.java]: class AttachingState::processMessage()
+	DctController.getInstance().executeRequest(apnRequest);
+
+-> [DctController.java]: executeRequest  
+	void executeRequest(RequestInfo request) {
+        sendMessage(obtainMessage(EVENT_EXECUTE_REQUEST, request));
+    }
+	This function will send EVENT_EXECUTE_REQUEST to DctController's handleMessage() and the message is processed by onExecuteRequest() 
+	
+-> [DctController.java]: onExecuteRequest()
+   	
+	 private void onExecuteRequest(RequestInfo requestInfo) {
+        if (requestInfo.executedPhoneId == INVALID_PHONE_INDEX &&
+                mRequestInfos.containsKey(requestInfo.request.requestId)) {
+            ......................
+            dcTracker.incApnRefCount(apn, requestInfo.getLog());
+        }
+    }
+
+-> [ApnContext.java]: incRefCount()
+
+	public void incRefCount(LocalLog log) {
+        synchronized (mRefCountLock) {
+            if (mRefCount == 0) {
+               // we wanted to leave the last in so it could actually capture the tear down
+               // of the network
+               requestLog("clearing log with size=" + mLocalLogs.size());
+               mLocalLogs.clear();
+            }
+            if (mLocalLogs.contains(log)) {
+                log.log("ApnContext.incRefCount has duplicate add - " + mRefCount);
+            } else {
+                mLocalLogs.add(log);
+                log.log("ApnContext.incRefCount - " + mRefCount);
+            }
+            if (mRefCount++ == 0) {
+                mDcTracker.setEnabled(mDcTracker.apnTypeToId(mApnType), true);
+            }
+        }
+    }
+
+-> [DcTrackerBase.java]: setEnabled()
+	This function will send EVENT_ENABLE_NEW_APN message to call onEnableApn().
+
+-> 【DcTracker.java】:onEnableApn() 
+-> 【DcTracker.java】:applyNewState()
+-> 	[DcTracker.java】: trySetupData()
+	trySetupData() -> bringUp()-> ...... -> [ConnectivityService.java]: updateNetworkInfo(). 	
+	Then, the following steps are same as "On/Off the mobile by the user interface".
+
+"That is, Mobile network is ON/OFF either by networkrequest or by user api." 
+	  	
+====================================================================
+4. The network status Icon's issue for Android M Multi-networking.||	
+====================================================================
+
+a) Display the network status Icon by default.
+Let's use mobile network as example:
+-> [MobileSignalController.java]: onSignalStrengthsChanged()
+
+class MobilePhoneStateListener extends PhoneStateListener {
+	.....
+    @Override
+    public void onSignalStrengthsChanged(SignalStrength signalStrength) {
+           
+    	mSignalStrength = signalStrength;
+    	updateTelephony();
+    }
+	....
+}
+
+-> [MobileSignalController.java]:  updateTelephony()
+ private final void updateTelephony() {
+        .... 
+        notifyListenersIfNecessary();
+ }
+
+-> [SignalController.java]: notifyListenersIfNecessary()
+	public void notifyListenersIfNecessary() {
+        if (isDirty()) {
+            saveLastState();
+            notifyListeners();
+        }
+    }
+ 
+-> [MobileSignalController.java]: notifyListeners()
+	This function will set the status Icon of mobile network.
+
+	As default, this is Okay, but in mult-network, some status Icon's
+	will be wrong. such as wifi's or mobile 's status Icon will be always with a "!",
+	and so on. That's why ?
+
+b)  Display the network status Icon under the mult-network.
+
+	In reality, before we call notifyListenersIfNecessary(), we should tell the SignalControler
+	about this status of this network.  SignalControler only know the default network's status by default.
+	"So, we should use the following function instead of notifyListenersIfNecessary() in 
+	[MobileSignalController.java]:updateTelephony()",  Let's show your details:
+
+->  [NetworkControllerImpl.java] : updateConnectivity()
+	private void updateConnectivity() {
+		//Qing:
+		// Clear the  mConnectedTransports & mValidatedTransports sets.
+		// The mConnectedTransports recorded all connected network type.
+		// The mValidatedTransports recorded all Validated network type.
+		//  (What is Validated? it's on work. can ping www.baidu.com )         
+        mConnectedTransports.clear();
+        mValidatedTransports.clear();
+
+		//Qing:
+		// Get the all NetworkCapabilities from the default network.
+		// Although the default network support all networktype, but at one time,
+		// it just has one network type is Validated.
+		// Qing:
+		// To support the mult-network, you should modify the function getDefaultNetworkCapabilitiesForUser()
+		// in ConnectivityService.java. you should add the Capabilities (include default network, mobile, wifi)
+		// in  this function.  Then, ValidatedTransports sets will include other Validated networks but not just
+		// the default network.  	
+        for (NetworkCapabilities nc :
+                mConnectivityManager.getDefaultNetworkCapabilitiesForUser(mCurrentUserId)) {
+				//Qing:
+				// This network 
+            for (int transportType : nc.getTransportTypes()) {
+                mConnectedTransports.set(transportType);
+				//Qing:
+				// If the network is Validated ? 
+                if (nc.hasCapability(NET_CAPABILITY_VALIDATED)) {
+                    mValidatedTransports.set(transportType);
+                }
+            }
+        }
+
+        mInetCondition = !mValidatedTransports.isEmpty();
+
+        pushConnectivityToSignals();
+    }
+
+->  [NetworkControllerImpl.java] : pushConnectivityToSignals()
+	private void pushConnectivityToSignals() {
+        // We want to update all the icons, all at once, for any condition change
+        for (MobileSignalController mobileSignalController : mMobileSignalControllers.values()) {
+            mobileSignalController.updateConnectivity(mConnectedTransports, mValidatedTransports);
+        }
+        mWifiSignalController.updateConnectivity(mConnectedTransports, mValidatedTransports);
+        mEthernetSignalController.updateConnectivity(mConnectedTransports, mValidatedTransports);
+    }
+	
+	This function will call updateConnectivity() of every network type. Let's show your mobile's
+
+-> [MobileSignalController.java]: updateConnectivity()
+	public void updateConnectivity(BitSet connectedTransports, BitSet validatedTransports) {
+        boolean isValidated = validatedTransports.get(mTransportType);
+        mCurrentState.isDefault = connectedTransports.get(mTransportType);
+        // Only show this as not having connectivity if we are default.
+        mCurrentState.inetCondition = (isValidated || !mCurrentState.isDefault) ? 1 : 0;
+        notifyListenersIfNecessary();
+    }
+	connectedTransports & validatedTransports will update the  mCurrentState. After set these states,
+	call notifyListenersIfNecessary() will update the mobile status Icon.
+	Otherwise，"isValidated" is always false, After call notifyListenersIfNecessary(), the status will
+	still be unValidated. If the status is unValidated, the status icon will be displayed with the "!".  
+
+	
+
+============================================
+5. The issue of route & DNS on Android M.||
+============================================ 
+If no network is LAN in mult-network, you can directly skip this chapter.
+
+In the android M mult-network, there are individual route to every network interface. 
+But for the DNS, it has some unexpection.
+
+If there is a LAN in your android mult-network system, You may face some troubles.
+"Other networks can't access any websit by DNS, but it's okay by the IP address".
+It's quite terrible，and that's why ?
+
+Let's show you the reason: 
+
+Generally， system get DNS by GetHostByName() or GetHostByAddr(). Finally, these api will
+call the corresponding function in DnsProxyListener.cpp.
+ 
+-> [DnsProxyListener.cpp]: GetHostByNameCmd::runCommand()
+
+	int DnsProxyListener::GetHostByNameCmd::runCommand(SocketClient *cli,
+                                            int argc, char **argv) {
+    	..................
+
+    	uint32_t mark = mDnsProxyListener->mNetCtrl->getNetworkForDns(&netId, uid);
+
+    	....
+    	DnsProxyListener::GetHostByNameHandler* handler =
+    	        new DnsProxyListener::GetHostByNameHandler(cli, name, af, netId, mark);
+    	handler->start();
+
+    	return 0;
+	}
+	1. get the netid by mDnsProxyListener->mNetCtrl->getNetworkForDns();
+	2. according to the netid to get the dns.
+
+-> [NetworkController.cpp]: getNetworkForDns()
+
+	uint32_t NetworkController::getNetworkForDns(unsigned* netId, uid_t uid) const {
+   		.....
+   		if (checkUserNetworkAccessLocked(uid, *netId) == 0) {
+        	fwmark.explicitlySelected = true;
+    	} else {
+			......
+        	if (virtualNetwork && virtualNetwork->getHasDns()) {
+        	    *netId = virtualNetwork->getNetId();
+        	} else {
+        	    *netId = mDefaultNetId;  //Qing: we should modify this to setting the correct netid####
+        	}
+    	}
+    	......
+	}
+	As we have seen, {*netId = mDefaultNetId;} that is :
+	No matter who want to get the dns, this function will always return the default network's id.	
+	If the default network is ethernet && ethernet is LAN (No DNS server), this function will always return a
+	network's id of ethernet.  But the DNS of ethernet is invalid. So, system always get a invalid DNS.
+	And it will can't access any websit by DNS.      
+	
+-> [DnsProxyListener.cpp]: GetHostByNameHandler::run()
+	handler->start() will call GetHostByNameHandler::run() function.
+
+	void DnsProxyListener::GetHostByNameHandler::run() {
+   
+    	struct hostent* hp;
+
+		//Qing: Get the DNS according to netid
+    	hp = android_gethostbynamefornet(mName, mAf, mNetId, mMark);
+
+    	..........
+	}
+	android_gethostbynamefornet() will get the real DNS.
+
+
+
+-> who set mDefaultNetId in NetworkController.cpp ?
+-> [ConnectivityService.java]:rematchNetworkAndRequests()
+	private void rematchNetworkAndRequests(NetworkAgentInfo newNetwork,
+            ReapUnvalidatedNetworks reapUnvalidatedNetworks) {
+		....
+		makeDefault(newNetwork);
+		.... 
+	}
+	
+-> [ConnectivityService.java]: makeDefault()
+	private void makeDefault(NetworkAgentInfo newNetwork) {
+        ......
+        mNetd.setDefaultNetId(newNetwork.network.netId);
+        .....
+    }
+
+-> [NetworkManagementService.java]:setDefaultNetId()
+	 public void setDefaultNetId(int netId) {
+       .....
+       mConnector.execute("network", "default", "set", netId);
+       .....
+    }
+
+-> [CommandListener.cpp]: runCommand()
+	int CommandListener::NetworkCommand::runCommand(SocketClient* client, int argc, char** argv) {
+		.... 			
+		//    0       1      2      3
+    	// network default  set  <netId>
+    	// network default clear
+   		if (!strcmp(argv[1], "default")) {
+       		......
+        	if (int ret = sNetCtrl->setDefaultNetwork(netId)) {
+            	return operationError(client, "setDefaultNetwork() failed", ret);
+        	}
+        	....
+    	}
+	}
+
+-> [NetworkController.cpp]: setDefaultNetwork():
+	int NetworkController::setDefaultNetwork(unsigned netId){
+		 .......
+   		 mDefaultNetId = netId;
+	} 
+	
+So, If the default network is Ethernet && Ethernet is LAN (no DNS),
+Then, system will set default network id (Ethernet id) for searching 
+the DNS. But Ethernet has no valid DNS cache. So others will can't access
+any website by DNS.
+
+Although Android libc support that every network has own DNS cache, system
+always return the DNS of the default network.  If the default network is Ethernet
+and Ethernet is LAN(No DNS), system will can't access any website by DNS.
+
+So, you should select a network that always has the valid DNS cache, such as mobile,
+Wifi and so on. you shold make this network as the default netid for searching 
+the DNS.   
+    
+=============================================
+6. Android network validation on Android M.||
+=============================================
+What's the validated network?
+As we described in chapter 4 . Once the network's Capability is NET_CAPABILITY_VALIDATED, 
+this network is validated .   That's why ?
+
+After called the updateNetworkInfo(), the network will work. So, there are a lot of work
+to be done in this function. Network validation also will be done in this function.
+ 
+-> [ConnectivityService.java]: updateNetworkInfo()
+ private void updateNetworkInfo(NetworkAgentInfo networkAgent, NetworkInfo newInfo) {
+	.....
+	// Qing: 
+	// This will caused the network validation 
+	// isCaptivePortal() is called.
+    networkAgent.networkMonitor.sendMessage(NetworkMonitor.CMD_NETWORK_CONNECTED);
+    scheduleUnvalidatedPrompt(networkAgent);
+	.....
+ } 
+
+
+-> [NetworkMonitor.java]: class DefaultState: processMessage()
+	private class DefaultState extends State {
+        @Override
+        public boolean processMessage(Message message) {
+            switch (message.what) {
+                ....
+                case CMD_NETWORK_CONNECTED:
+                    transitionTo(mEvaluatingState);
+                    return HANDLED;
+				....
+			}
+		}
+	}
+
+-> [NetworkMonitor.java]: class EvaluatingState:enter()
+	 private class EvaluatingState extends State {
+        .....
+        @Override
+        public void enter() {
+            sendMessage(CMD_REEVALUATE, ++mReevaluateToken, 0);
+            .......
+        }
+	}
+
+-> [NetworkMonitor.java]: class EvaluatingState: processMessage()
+	  public boolean processMessage(Message message) {
+            switch (message.what) {
+                case CMD_REEVALUATE:
+                    .............
+					//Qing:
+					// isCaptivePortal() will do a URL fetch on "http://connectivitycheck.gstatic.com/generate_204"
+					// to see if we get the data we expect.
+					// If this function return 204, this network is okay, then turn to mValidatedState. 
+					//
+                    int httpResponseCode = isCaptivePortal();
+                    if (httpResponseCode == 204) {
+                        transitionTo(mValidatedState);
+                    } else if (httpResponseCode >= 200 && httpResponseCode <= 399) {
+                        transitionTo(mCaptivePortalState);
+                    } else {
+						// Qing:
+						// this access is failed,  this function will retry to send CMD_REEVALUATE message
+						// to re-validate this network. 
+                        final Message msg = obtainMessage(CMD_REEVALUATE, ++mReevaluateToken, 0);
+                        sendMessageDelayed(msg, mReevaluateDelayMs);
+
+						//Qing:
+						// Send EVENT_NETWORK_TESTED to connectivityService about the INVALID test. 
+                        mConnectivityServiceHandler.sendMessage(obtainMessage(
+                                EVENT_NETWORK_TESTED, NETWORK_TEST_RESULT_INVALID, 0,
+                                mNetworkAgentInfo));
+                       .........
+                    }
+                    return HANDLED;
+                .........
+            }
+        }
+		If everything is Okay, then the statemachine will transition to the validated State. That is , it's 
+		a validated network.
+		
+-> [NetworkMonitor.java]: class ValidatedState : enter()
+	private class ValidatedState extends State {
+        @Override
+        public void enter() {
+            mConnectivityServiceHandler.sendMessage(obtainMessage(EVENT_NETWORK_TESTED,
+                    NETWORK_TEST_RESULT_VALID, 0, mNetworkAgentInfo));
+        }
+	}
+	The enter() just send EVENT_NETWORK_TESTED message to tell connectivityService that this network is valid
+	by NETWORK_TEST_RESULT_VALID.
+
+	Note:
+	Once the statemachine enter ValidatedState, statemachine will not re-validate this network and directly tell them that
+	this network is validated when system send CMD_NETWORK_CONNECTED message
+
+
+-> [ConnectivityService.java]: NetworkStateTrackerHandler： handleMessage()
+	 private class NetworkStateTrackerHandler extends Handler {
+       	.......
+        public void handleMessage(Message msg) {
+			case NetworkMonitor.EVENT_NETWORK_TESTED: {
+                    NetworkAgentInfo nai = (NetworkAgentInfo)msg.obj;
+                    if (isLiveNetworkAgent(nai, "EVENT_NETWORK_TESTED")) {
+                        final boolean valid =
+                                (msg.arg1 == NetworkMonitor.NETWORK_TEST_RESULT_VALID);
+                        if (DBG) log(nai.name() + " validation " + (valid ? " passed" : "failed"));
+                        if (valid != nai.lastValidated) {
+                            final int oldScore = nai.getCurrentScore();
+                            nai.lastValidated = valid;
+                            nai.everValidated |= valid;
+                            updateCapabilities(nai, nai.networkCapabilities);
+                            // If score has changed, rebroadcast to NetworkFactories. b/17726566
+                            if (oldScore != nai.getCurrentScore()) sendUpdatedScoreToFactories(nai);
+                        }
+                        updateInetCondition(nai);
+                        ......
+                    }
+                    break;
+        	}
+
+		}
+	}
+
+-> [ConnectivityService.java]: updateCapabilities()
+
+	 private void updateCapabilities(NetworkAgentInfo nai, NetworkCapabilities networkCapabilities) {
+        .......
+		//Qing:
+		// If the last validation is validated, then system will add NET_CAPABILITY_VALIDATED into networkCapabilities
+		// of this  network.
+		// If the last validation is unvalidated, then system will remove NET_CAPABILITY_VALIDATED into networkCapabilities
+		// of this  network.
+	
+        if (nai.lastValidated) {
+            networkCapabilities.addCapability(NET_CAPABILITY_VALIDATED);
+        } else {
+            networkCapabilities.removeCapability(NET_CAPABILITY_VALIDATED);
+        }
+        .......
+    }
+	That is, when networkCapabilities has NET_CAPABILITY_VALIDATED, the network is validated, and it's Okay.
+	When networkCapabilities has no NET_CAPABILITY_VALIDATED, the network is unvalidated, and the network can't work.
+    System & app always use the NET_CAPABILITY_VALIDATED to check whether the network is avaliable.
+	That's all.
+																-Qing
+																2017/09/14					
+	
