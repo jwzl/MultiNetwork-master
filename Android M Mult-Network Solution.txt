@@ -1,5 +1,5 @@
 ========================
-1. Android Networking ||
+1. Android Network ||
 ========================
 
 								Android network API
@@ -26,7 +26,7 @@ Data communication API: like the data bus of a device. The primary responsibilit
 
 
 ==================================
-2. Android Multi-networking App.||
+2. Android Multi-network App.||
 ==================================
 	Before show the APP, we introduce some Multi-networking API for you.	
 	1) Binds the current process to network:
@@ -761,7 +761,7 @@ from sendUpdatedScoreToFactories().
 "That is, Mobile network is ON/OFF either by networkrequest or by user api." 
 	  	
 ====================================================================
-4. The network status Icon's issue for Android M Multi-networking.||	
+4. The network status Icon's issue for Android M Multi-network.||	
 ====================================================================
 
 a) Display the network status Icon by default.
@@ -875,7 +875,7 @@ b)  Display the network status Icon under the mult-network.
 ============================================
 5. The issue of route & DNS on Android M.||
 ============================================ 
-If no network is LAN in mult-network, you can directly skip this chapter.
+If no network is LAN in multi-network, you can directly skip this chapter.
 
 In the android M mult-network, there are individual route to every network interface. 
 But for the DNS, it has some unexpection.
@@ -1149,5 +1149,5 @@ to be done in this function. Network validation also will be done in this functi
     System & app always use the NET_CAPABILITY_VALIDATED to check whether the network is avaliable.
 	That's all.
 																-Qing
-																2017/09/14					
+																2017/09/19					
 	
